@@ -13,57 +13,56 @@ import pandas as pd
 import ta
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 from keras._tf_keras.keras.models import Sequential
-from keras._tf_keras.keras.layers import LSTM, Dense, Dropout
+from keras._tf_keras.keras.layers import LSTM, Dense, Dropout, Input
 from keras._tf_keras.keras.regularizers import L2
 
-nvda = yf.Ticker("AAPL")
+stock_chosen = yf.Ticker("AAPL")
 
-nvda_data = nvda.history(start='2010-01-01', end='2024-09-01', interval="1d")
+stock_data = stock_chosen.history(start='2010-01-01', end='2024-09-01', interval="1d")
 
-nvda_data['MA_20'] = ta.trend.sma_indicator(nvda_data['Close'], window=20)
-nvda_data['MA_50'] = ta.trend.sma_indicator(nvda_data['Close'], window=50)
+stock_data['MA_20'] = ta.trend.sma_indicator(stock_data['Close'], window=20)
+stock_data['MA_50'] = ta.trend.sma_indicator(stock_data['Close'], window=50)
 
-nvda_data['RSI'] = ta.momentum.rsi(nvda_data['Close'], window=14)
+stock_data['RSI'] = ta.momentum.rsi(stock_data['Close'], window=14)
 
-macd = ta.trend.MACD(nvda_data['Close'])
-nvda_data['MACD'] = macd.macd()
-nvda_data['MACD_Signal'] = macd.macd_signal()
-nvda_data['MACD_Diff'] = macd.macd_diff()
+macd = ta.trend.MACD(stock_data['Close'])
+stock_data['MACD'] = macd.macd()
+stock_data['MACD_Signal'] = macd.macd_signal()
+stock_data['MACD_Diff'] = macd.macd_diff()
 
-bollinger = ta.volatility.BollingerBands(nvda_data['Close'], window=20, window_dev=2)
-nvda_data['Bollinger_High'] = bollinger.bollinger_hband()
-nvda_data['Bollinger_Low'] = bollinger.bollinger_lband()
+bollinger = ta.volatility.BollingerBands(stock_data['Close'], window=20, window_dev=2)
+stock_data['Bollinger_High'] = bollinger.bollinger_hband()
+stock_data['Bollinger_Low'] = bollinger.bollinger_lband()
 
-nvda_data.dropna(inplace=True)
+stock_data.dropna(inplace=True)
 
 sp500 = yf.download('^GSPC', start='2010-01-01', end='2024-09-01', progress=False)
 sp500 = sp500['Close'].rename('S&P500_Close')
 
-nvda_data.index = nvda_data.index.tz_localize(None)
+stock_data.index = stock_data.index.tz_localize(None)
 sp500.index = sp500.index.tz_localize(None)
 
-print(nvda_data.index.tz)
+print(stock_data.index.tz)
 print(sp500.index.tz)
 
-nvda_data = nvda_data.join(sp500, how='inner')
+stock_data = stock_data.join(sp500, how='inner')
 
-print(nvda_data.columns)
+print(stock_data.columns)
 
 # relevant features
 features = ['Open', 'Close', 'Volume', 'S&P500_Close']
-nvda_data = nvda_data[features].dropna()
+stock_data = stock_data[features].dropna()
 
-nvda_data['Target'] = nvda_data['Close'].shift(-1)
-nvda_data.dropna(inplace=True)
+stock_data['Target'] = stock_data['Close'].shift(-1)
+stock_data.dropna(inplace=True)
 
-X = nvda_data[features]
-y = nvda_data['Target']
+X = stock_data[features]
+y = stock_data['Target']
 
 X_train_full, X_test, y_train_full, y_test = train_test_split(
     X, y, test_size=0.15, shuffle=False)  # Shuffle=False for time series
@@ -98,11 +97,18 @@ X_train_lstm, y_train_lstm = create_sequences(X_train_scaled, y_train.values, wi
 X_test_lstm, y_test_lstm = create_sequences(X_test_scaled, y_test.values, window_size)
 
 model = Sequential()
-model.add(LSTM(100, return_sequences=True, kernel_regularizer=L2(0.001), input_shape=(X_train_lstm.shape[1], X_train_lstm.shape[2])))
+# input layer to define the shape of input
+model.add(Input(shape=(X_train_lstm.shape[1], X_train_lstm.shape[2])))
+
+# LSTM layers
+model.add(LSTM(100, return_sequences=True, kernel_regularizer=tf.keras.regularizers.L2(0.001)))
 model.add(Dropout(0.3))
-model.add(LSTM(100, return_sequences=False, kernel_regularizer=L2(0.001)))
+
+model.add(LSTM(100, return_sequences=False, kernel_regularizer=tf.keras.regularizers.L2(0.001)))
 model.add(Dropout(0.3))
-model.add(Dense(50, kernel_regularizer=L2(0.001)))
+
+# Dense layers
+model.add(Dense(50, kernel_regularizer=tf.keras.regularizers.L2(0.001)))
 model.add(Dense(1))
 
 model.compile(optimizer='adam', loss='mean_squared_error')
