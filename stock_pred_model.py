@@ -76,6 +76,10 @@ X_train_scaled = scaler.fit_transform(X_train)
 X_val_scaled = scaler.transform(X_val)
 X_test_scaled = scaler.transform(X_test)
 
+y_train_scaled = scaler.transform(y_train.values.reshape(-1, 1))
+y_val_scaled = scaler.transform(y_val.values.reshape(-1, 1))
+y_test_scaled = scaler.transform(y_test.values.reshape(-1, 1))
+
 """LSTM Neural Network:"""
 
 window_size = 120
@@ -87,37 +91,32 @@ def create_sequences(X, y, window_size):
         ys.append(y[i+window_size])
     return np.array(Xs), np.array(ys)
 
-target_scaler = MinMaxScaler(feature_range=(0, 1))
-y_train_scaled = target_scaler.fit_transform(y_train.values.reshape(-1, 1))  # Reshape required for scaling
-y_val_scaled = target_scaler.transform(y_val.values.reshape(-1, 1))  # Transform validation target
-y_test_scaled = target_scaler.transform(y_test.values.reshape(-1, 1))  # Transform test target
+X_train_lstm, y_train_lstm = create_sequences(X_train_scaled, y_train_scaled, window_size)
+X_val_lstm, y_val_lstm = create_sequences(X_val_scaled, y_val_scaled, window_size)
+X_test_lstm, y_test_lstm = create_sequences(X_test_scaled, y_test_scaled, window_size)
 
-X_val_lstm, y_val_lstm = create_sequences(X_val_scaled, y_val.values, window_size)
-X_train_lstm, y_train_lstm = create_sequences(X_train_scaled, y_train.values, window_size)
-X_test_lstm, y_test_lstm = create_sequences(X_test_scaled, y_test.values, window_size)
+model = Sequential([
+    Input(shape=(X_train_lstm.shape[1], X_train_lstm.shape[2])),
+    LSTM(128, return_sequences=True, kernel_regularizer=L2(0.001)),
+    Dropout(0.2),
+    LSTM(64, return_sequences=False, kernel_regularizer=L2(0.001)),
+    Dropout(0.2),
+    Dense(32, activation='relu', kernel_regularizer=L2(0.001)),
+    Dense(1)
+])
 
-model = Sequential()
-# input layer to define the shape of input
-model.add(Input(shape=(X_train_lstm.shape[1], X_train_lstm.shape[2])))
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), 
+              loss='mean_squared_error')
 
-# LSTM layers
-model.add(LSTM(100, return_sequences=True, kernel_regularizer=tf.keras.regularizers.L2(0.001)))
-model.add(Dropout(0.3))
-
-model.add(LSTM(100, return_sequences=False, kernel_regularizer=tf.keras.regularizers.L2(0.001)))
-model.add(Dropout(0.3))
-
-# Dense layers
-model.add(Dense(50, kernel_regularizer=tf.keras.regularizers.L2(0.001)))
-model.add(Dense(1))
-
-model.compile(optimizer='adam', loss='mean_squared_error')
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=0.0001)
 
 history = model.fit(
     X_train_lstm, y_train_lstm,
-    epochs=50,
+    epochs=100,
     batch_size=32,
-    validation_data=(X_val_lstm, y_val_lstm),  # Use validation set
+    validation_data=(X_val_lstm, y_val_lstm),
+    callbacks=[early_stopping, reduce_lr],
     verbose=1
 )
 
@@ -125,13 +124,21 @@ history = model.fit(
 y_pred_lstm = model.predict(X_test_lstm)
 y_pred_lstm = y_pred_lstm.flatten()
 
-mse_lstm = mean_squared_error(y_test_lstm, y_pred_lstm)
+# Inverse transform the scaled data
+y_test_inv = scaler.inverse_transform(y_test_lstm.reshape(-1, 1)).flatten()
+y_pred_inv = scaler.inverse_transform(y_pred_lstm.reshape(-1, 1)).flatten()
+
+# Calculate MSE and RMSE
+mse_lstm = mean_squared_error(y_test_inv, y_pred_inv)
 rmse = np.sqrt(mse_lstm)
 
 average_actual_price = np.mean(y_test_lstm)
-
 rmse_percentage_error = (rmse / average_actual_price) * 100
+
+print(f"MSE: {mse_lstm:.2f}")
+print(f"RMSE: {rmse:.2f}")
 print(f"RMSE Percentage Error: {rmse_percentage_error:.2f}%")
+
 
 plt.figure(figsize=(14, 7))
 
@@ -146,5 +153,4 @@ plt.title('LSTM: Actual vs Predicted Prices (Train and Predict)')
 plt.xlabel('Time')
 plt.ylabel('Price')
 plt.legend()
-
 plt.show()
